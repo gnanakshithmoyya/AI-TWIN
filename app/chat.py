@@ -39,6 +39,9 @@ Rules:
 - Do NOT invent medical facts or thresholds.
 - Do NOT diagnose.
 - Base every statement on HEALTH STATE and MEDICAL REFERENCES.
+- Use the explanations and trends already provided in HEALTH STATE; do not add new reasons.
+- If trend is missing, do not guess direction.
+- Do NOT recommend starting, stopping, or changing medications; encourage clinician discussion instead.
 - If references are limited, keep guidance high-level and encourage clinician review for concerns.
 
 HEALTH STATE (FACTS):
@@ -69,4 +72,7 @@ def twin_summary(payload: SummaryRequest):
     extra_fields = getattr(payload, "__pydantic_extra__", None)
     if extra_fields:
         combined.update(extra_fields)
-    return evaluate_health(combined)
+    return {
+        "summary": evaluate_health(combined),
+        "disclaimer": "This app provides educational health insights and trends. It does not diagnose or replace medical advice. Always consult a qualified healthcare professional.",
+    }
