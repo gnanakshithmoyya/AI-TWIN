@@ -55,13 +55,15 @@ ollama pull llama3
 ollama pull nomic-embed-text
 ```
 
-Clone and set up the backend:```bash
+Clone and set up the backend:
+```bash
 git clone https://github.com/your-username/vitatwin.git
 cd vitatwin/twin_engine
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000```
+uvicorn app.main:app --reload --port 8000
+```
 
 Set up and run the frontend:
 cd frontend_app
