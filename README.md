@@ -99,8 +99,3 @@ VitaTwin provides educational health insights and trends only.
 It does not diagnose, treat, or replace professional medical advice.
 Always consult a qualified healthcare professional for medical decisions.
 
-⸻
-
-License
-
-MIT License
