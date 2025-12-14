@@ -53,7 +53,7 @@ The AI chat only rephrases rule-generated facts. It cannot invent diseases, diag
 brew install ollama
 ollama pull llama3
 ollama pull nomic-embed-text
-
+```
 
 Clone and set up the backend:
 git clone https://github.com/your-username/vitatwin.git
