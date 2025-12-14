@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Frontend
+node_modules/
+
+# Archives
+*.zip
+
+# OS
+.DS_Store
+
+# Environment variables
+.env
