@@ -1,17 +1,31 @@
 # app/chat.py
 
+from __future__ import annotations
+from typing import Any, Dict
+import time
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+import ollama
+
 from app.rules import evaluate_health
 from app.rag.retriever import retrieve
-import ollama
+from app.safety import (
+    is_forbidden_question,
+    check_missing_data,
+    response_mentions_unknown_terms,
+    DISCLAIMER_TEXT,
+)
+from app.intent.classifier import classify_intent
+from app.prompt.adapter import build_prompt
+from app.logging.events import log_event, make_event
 
 router = APIRouter()
 
 
 class ChatRequest(BaseModel):
     question: str
-    health_state: dict
+    health_state: Dict[str, Any]  # raw inputs
 
 
 class SummaryRequest(BaseModel):
@@ -26,40 +40,95 @@ class SummaryRequest(BaseModel):
 
 @router.post("/twin/chat")
 def chat_with_twin(payload: ChatRequest):
-    health_state = evaluate_health(payload.health_state)
-    medical_docs = retrieve(payload.question + str(health_state))
-    if medical_docs:
-        references = "\n\n".join(medical_docs)
-    else:
-        references = "No specific references retrieved. Stay within provided health facts."
+    start = time.monotonic()
+    question = (payload.question or "").strip()
 
-    prompt = f"""
-You are a caring, safety-first health assistant.
-Rules:
-- Do NOT invent medical facts or thresholds.
-- Do NOT diagnose.
-- Base every statement on HEALTH STATE and MEDICAL REFERENCES.
-- Use the explanations and trends already provided in HEALTH STATE; do not add new reasons.
-- If trend is missing, do not guess direction.
-- Do NOT recommend starting, stopping, or changing medications; encourage clinician discussion instead.
-- If references are limited, keep guidance high-level and encourage clinician review for concerns.
+    # 1) Deterministic facts are the source of truth
+    facts = evaluate_health(payload.health_state)
 
-HEALTH STATE (FACTS):
-{health_state}
+    # 2) Hard block: forbidden medical advice topics
+    if is_forbidden_question(question):
+        latency_ms = (time.monotonic() - start) * 1000
+        log_event(
+            make_event(
+                intent="FORBIDDEN",
+                intent_confidence=1.0,
+                question=question,
+                health_state=payload.health_state,
+                missing_fields=[],
+                safety={"medication_refusal": True, "diagnosis_refusal": True},
+                latency_ms=latency_ms,
+            )
+        )
+        return {
+            "reply": (
+                "I can’t help with diagnosis or medication decisions. "
+                "Please consult a qualified healthcare professional."
+            )
+        }
 
-MEDICAL REFERENCES:
-{references}
+    # 3) Classify intent (deterministic)
+    intent_result = classify_intent(question, payload.health_state)
 
-USER QUESTION:
-{payload.question}
-""".strip()
+    # 4) If user asks about an area but facts don’t contain that signal → refuse
+    missing, msg = check_missing_data(question, facts)
+    if missing:
+        latency_ms = (time.monotonic() - start) * 1000
+        log_event(
+            make_event(
+                intent=intent_result.intent,
+                intent_confidence=intent_result.confidence,
+                question=question,
+                health_state=payload.health_state,
+                missing_fields=intent_result.missing_fields or [],
+                safety={"medication_refusal": False, "diagnosis_refusal": False},
+                latency_ms=latency_ms,
+            )
+        )
+        return {"reply": msg}
 
-    response = ollama.chat(
+    # 5) Retrieve references (for explanation only; cannot override facts)
+    refs = retrieve(question + " " + str(facts), top_k=2)
+
+    # 6) Build prompts via adapter
+    system_prompt, user_prompt = build_prompt(question, facts, intent_result, refs)
+
+    # 7) Deterministic generation settings
+    resp = ollama.chat(
         model="llama3",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        options={
+            "temperature": 0.0,
+            "top_p": 0.1,
+            "num_predict": 220,
+        },
     )
 
-    return {"reply": response["message"]["content"]}
+    text = (resp.get("message", {}) or {}).get("content", "").strip()
+    if not text:
+        text = f"I don’t have enough information to answer that safely.\n\n{DISCLAIMER_TEXT}"
+
+    # 8) Post-check for off-limits terms; fall back if needed
+    if response_mentions_unknown_terms(text, facts):
+        text = f"I don’t have enough information to answer that safely.\n\n{DISCLAIMER_TEXT}"
+
+    latency_ms = (time.monotonic() - start) * 1000
+    log_event(
+        make_event(
+            intent=intent_result.intent,
+            intent_confidence=intent_result.confidence,
+            question=question,
+            health_state=payload.health_state,
+            missing_fields=intent_result.missing_fields or [],
+            safety={"medication_refusal": intent_result.intent == "SAFETY_MEDICATION", "diagnosis_refusal": intent_result.intent == "DIAGNOSIS_REQUEST"},
+            latency_ms=latency_ms,
+        )
+    )
+
+    return {"reply": text}
 
 
 @router.post("/twin/summary")
@@ -74,5 +143,5 @@ def twin_summary(payload: SummaryRequest):
         combined.update(extra_fields)
     return {
         "summary": evaluate_health(combined),
-        "disclaimer": "This app provides educational health insights and trends. It does not diagnose or replace medical advice. Always consult a qualified healthcare professional.",
+        "disclaimer": DISCLAIMER_TEXT,
     }
