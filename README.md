@@ -1,118 +1,101 @@
-VitaTwin 🧬
+# VitaTwin 🧬
 
 A Safe, Explainable AI Body Twin
 
-VitaTwin is a non-diagnostic, AI-powered health companion that helps users understand their health data in a clear, calm, and explainable way.
+VitaTwin is a non-diagnostic, AI-powered health companion that helps users understand their health data in a clear, calm, and human way. It combines deterministic medical logic with a hallucination-locked AI layer to provide educational health insights without diagnoses or medication advice.
 
-It combines:
-	•	a deterministic medical rules engine
-	•	trend & explainability logic
-	•	hallucination-locked AI responses
-	•	privacy-safe learning from user questions
+> ⚠️ VitaTwin does not diagnose conditions or provide medication guidance.  
+> It is designed for education, awareness, and health understanding only.
 
-⚠️ VitaTwin does not diagnose conditions or provide medication advice.
-It is designed for education, awareness, and health understanding only.
+---
 
-⸻
+## Features
 
-✨ Key Features
+### Deterministic Health Engine
 
-🧠 Deterministic Health Engine
+All medical logic is handled by a deterministic rules engine (`app/rules.py`). The AI model never makes medical decisions.
 
-All medical logic is handled by a rules engine (app/rules.py):
-	•	Glucose, BP, lipids, sleep, activity, BMI, nutrition labs
-	•	Reproductive health & mental/stress signals
-	•	Clear severity levels, risks, recommendations, and doctor flags
+Supported signals include glucose, blood pressure, cholesterol, triglycerides, sleep, activity, BMI, nutrition-related labs, reproductive health indicators, and stress/mood signals. Each signal produces deterministic severity levels, risks, recommendations, and doctor flags.
 
-No medical decisions are ever made by the AI model.
+---
 
-⸻
+### Explainability and Trends
 
-🔍 Explainability & Trends
+Every health signal includes the rule that triggered, the thresholds used, why it matters, trend direction (improving / worsening / stable), confidence score (0–100), and sparkline-ready historical values. All trends are history-based and recency-weighted.
 
-Each health signal includes:
-	•	Why the rule triggered
-	•	Thresholds used
-	•	Why it matters
-	•	Trend direction (improving / worsening / stable)
-	•	Confidence score (0–100)
-	•	Sparkline-ready data for visualization
+---
 
-⸻
+### Human-Style AI Chat (Hallucination Locked)
 
-💬 Human-Style AI Chat (Hallucination-Locked)
+The AI chat only rephrases rule-generated facts. It cannot invent diseases, diagnoses, or medications. Unsafe questions are refused, and at most one clarifying question is asked when required data is missing. Responses are calm, supportive, and non-clinical.
 
-The AI:
-	•	Only rephrases rule-generated facts
-	•	Cannot invent diseases, medications, or diagnoses
-	•	Refuses unsafe questions (meds, diagnosis)
-	•	Asks at most one clarifying question if data is missing
+---
 
-⸻
+### Safety and Privacy Guarantees
 
-🛡️ AI Safety Guarantees
-	•	❌ No hallucinations
-	•	❌ No diagnosis or medication advice
-	•	❌ No learning from AI outputs
-	•	✅ Learning only from user questions (intent & missing fields)
-	•	✅ Privacy-safe logging (no raw medical values stored)
+- No hallucinations  
+- No diagnosis or medication advice  
+- No learning from AI outputs  
+- Learning only from user questions (intent and missing fields)  
+- Privacy-safe logging with no raw medical values stored  
 
-⸻
+---
 
-🏗️ Tech Stack
+## Installation
 
-Backend
-	•	FastAPI
-	•	Python 3.9+
-	•	Deterministic rules engine
-	•	Ollama (local LLM)
-	•	Pytest (full test coverage)
+### Prerequisites
 
-Frontend
-	•	React + TypeScript
-	•	Vite
-	•	Fetch-based API integration
+- Python 3.9+
+- Node.js 18+
+- Ollama installed
 
-⸻
+```bash
+brew install ollama
+ollama pull llama3
+ollama pull nomic-embed-text
 
-🚀 Running VitaTwin Locally
 
-1️⃣ Prerequisites
-	•	Python 3.9+
-	•	Node.js 18+
-	•   Ollama
-
-Install Ollama: 
-•brew install ollama
-
-Pull required models:
-•ollama pull llama3
-•ollama pull nomic-embed-text
-Backend Setup
-•git clone https://github.com/your-username/vitatwin.git
-•cd vitatwin/twin_engine
+Clone and set up the backend:
+git clone https://github.com/your-username/vitatwin.git
+cd vitatwin/twin_engine
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-Run backend:
 uvicorn app.main:app --reload --port 8000
-Frontend Setup
+
+Set up and run the frontend:
 cd frontend_app
 npm install
+
 Create .env.local:
 VITE_API_BASE=http://127.0.0.1:8000
-Run frontend:
+
+Start the frontend:
 npm run dev
-Visit:
-👉 http://localhost:5173
+
+Usage
+
+Upload or enter health data, view explainable summaries and trends, ask natural-language questions in chat, and receive safe, non-diagnostic insights grounded strictly in your data.
 
 ⸻
 
-🧪 Testing
-Run all backend tests:
-pytest app/evals -q
-📜 Disclaimer
+Testing
 
-VitaTwin provides educational health insights and trends.
+Run the full backend test suite:
+pytest app/evals -q
+
+Tests cover deterministic rules, hallucination prevention, intent classification, trend confidence logic, safety refusals, and privacy-safe logging.
+
+⸻
+
+Disclaimer
+
+VitaTwin provides educational health insights and trends only.
 It does not diagnose, treat, or replace professional medical advice.
-Always consult a qualified healthcare professional.
+Always consult a qualified healthcare professional for medical decisions.
+
+⸻
+
+License
+
+MIT License
