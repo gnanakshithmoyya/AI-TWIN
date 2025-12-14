@@ -80,14 +80,17 @@ Frontend
 1️⃣ Prerequisites
 	•	Python 3.9+
 	•	Node.js 18+
-	•	Ollama installed
-brew install ollama
+	•   Ollama
+
+Install Ollama: 
+•brew install ollama
+
 Pull required models:
-ollama pull llama3
-ollama pull nomic-embed-text
+•ollama pull llama3
+•ollama pull nomic-embed-text
 Backend Setup
-git clone https://github.com/your-username/vitatwin.git
-cd vitatwin/twin_engine
+•git clone https://github.com/your-username/vitatwin.git
+•cd vitatwin/twin_engine
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
