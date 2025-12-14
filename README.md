@@ -55,7 +55,7 @@ ollama pull llama3
 ollama pull nomic-embed-text
 ```
 
-Clone and set up the backend:```
+Clone and set up the backend:```bash
 git clone https://github.com/your-username/vitatwin.git
 cd vitatwin/twin_engine
 python3 -m venv venv
