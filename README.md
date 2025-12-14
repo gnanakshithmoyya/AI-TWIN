@@ -66,15 +66,18 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Set up and run the frontend:
+```bash
 cd frontend_app
 npm install
-
+```
 Create .env.local:
+```bash
 VITE_API_BASE=http://127.0.0.1:8000
-
+```
 Start the frontend:
+```bash
 npm run dev
-
+```
 Usage
 
 Upload or enter health data, view explainable summaries and trends, ask natural-language questions in chat, and receive safe, non-diagnostic insights grounded strictly in your data.
