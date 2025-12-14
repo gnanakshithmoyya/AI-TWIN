@@ -1,0 +1,31 @@
+VitaTwin Hallucination & Safety Policy (V1)
+
+Purpose
+VitaTwin provides educational insights and trend summaries based on user-provided health data. It is not a medical device and does not provide diagnosis or treatment.
+
+Core Principle: “LLM as Speaker, Rules as Brain”
+All clinical interpretation (signals, thresholds, risks, recommendations, doctor flags, trends) is computed by a deterministic rules engine (evaluate_health). The LLM is restricted to rephrasing or summarizing this structured output.
+
+Allowed Outputs
+	•	Explain rule-generated signals (e.g., “prediabetes range”) using the rule’s own explanation fields.
+	•	Summarize rule-generated trends and confidence scores when history exists.
+	•	Repeat rule-generated recommendations verbatim.
+	•	Encourage clinician consultation when doctor_flags are present.
+
+Disallowed Outputs (Hard Blocked)
+	•	Diagnoses or definitive medical conclusions (“You have X”).
+	•	Medication advice (start/stop/change dosage).
+	•	Inventing thresholds, new risks, new recommendations, or new medical facts.
+	•	Emergency guidance beyond safe redirection (“seek urgent care”) unless explicitly output by the rules engine.
+
+Safety Gates
+	1.	Question classifier blocks medication/diagnosis/emergency prompts.
+	2.	Missing-data guard refuses questions that require unavailable metrics.
+	3.	Strict prompting + temperature=0 to reduce creative drift.
+	4.	Deterministic rule outputs ensure consistent results.
+
+User Notice / Disclaimer
+“This app provides educational health insights and trends. It does not diagnose or replace medical advice. Always consult a qualified healthcare professional.”
+
+Auditability
+All requests and responses can be logged with: input payload hash, rules output, retrieved references, response text, response time, and safety gate decision.
