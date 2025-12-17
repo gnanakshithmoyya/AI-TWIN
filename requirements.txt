@@ -4,3 +4,7 @@ numpy==1.26.4
 pydantic==2.12.5
 ollama==0.3.1
 pytest==8.3.2
+sqlalchemy==2.0.29
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
+shortuuid==1.0.11

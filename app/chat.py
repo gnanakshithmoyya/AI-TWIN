@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 import ollama
 
@@ -17,8 +17,21 @@ from app.safety import (
     DISCLAIMER_TEXT,
 )
 from app.intent.classifier import classify_intent
-from app.prompt.adapter import build_prompt
+from app.prompt.adapter import build_prompt, _clarifying_question
 from app.logging.events import log_event, make_event
+from app.auth.security import decode_token
+from app.chat_store import repo
+from app.auth.database import SessionLocal
+
+
+def decode_token_from_header(header: str, expected_type: str) -> int:
+    if not header or not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    token = header.split(" ", 1)[1]
+    user_id = decode_token(token, expected_type=expected_type)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user_id
 
 router = APIRouter()
 
@@ -38,11 +51,21 @@ class SummaryRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
-@router.post("/twin/chat")
-def chat_with_twin(payload: ChatRequest):
+def require_auth(authorization: str = Header(None)) -> int:
+    # Authorization must be checked before body parsing in wrappers
+    return decode_token_from_header(authorization, expected_type="access")
+
+
+def process_chat(user_id: int, payload: ChatRequest, chat_context: Dict[str, Any] = None):
     start = time.monotonic()
     question = (payload.question or "").strip()
 
+    # DB session for chat storage if passed via chat_context
+    db = None
+    chat = None
+    if chat_context:
+        db = chat_context.get("db")
+        chat = chat_context.get("chat")
     # 1) Deterministic facts are the source of truth
     facts = evaluate_health(payload.health_state)
 
@@ -90,8 +113,25 @@ def chat_with_twin(payload: ChatRequest):
     # 5) Retrieve references (for explanation only; cannot override facts)
     refs = retrieve(question + " " + str(facts), top_k=2)
 
+    # 5b) Retrieve chat summaries and user memory
+    chat_summaries = []
+    user_memory_snippets = []
+    if db and chat:
+        chat_summaries = repo.retrieve_chat_summaries(db, chat.id, limit=2)
+        user_memory_snippets = repo.retrieve_user_memory(db, user_id, limit=3, keywords=intent_result.matched_keywords)
+
+    clarifier = _clarifying_question(intent_result)
+
     # 6) Build prompts via adapter
-    system_prompt, user_prompt = build_prompt(question, facts, intent_result, refs)
+    system_prompt, user_prompt = build_prompt(
+        question=question,
+        facts=facts,
+        intent_result=intent_result,
+        retrieved_docs=refs,
+        chat_summaries=chat_summaries,
+        user_memory_snippets=user_memory_snippets,
+        clarifier=clarifier,
+    )
 
     # 7) Deterministic generation settings
     resp = ollama.chat(
@@ -128,11 +168,53 @@ def chat_with_twin(payload: ChatRequest):
         )
     )
 
+    # 9) Persist chat message + summary + memory (without raw values)
+    if db and chat:
+        try:
+            repo.upsert_chat_summary(db, chat, summary_text=_make_safe_chat_summary(facts, intent_result))
+            repo.add_user_memory(
+                db,
+                user_id=user_id,
+                kind="missing_field_pattern" if intent_result.missing_fields else "topic_pattern",
+                content=_make_user_memory_entry(intent_result, facts),
+            )
+        except Exception:
+            # persistence errors shouldn't break chat
+            pass
+
     return {"reply": text}
 
 
+@router.post("/twin/chat")
+async def chat_with_twin(request: Request, user_id: int = Depends(require_auth), chat_context: Dict[str, Any] = None):
+    # Auth checked before body parsing; now parse body
+    body = await request.json()
+    payload = ChatRequest.model_validate(body)
+    return process_chat(user_id, payload, chat_context)
+
+
+def _make_safe_chat_summary(facts: Dict[str, Any], intent_result):
+    parts = []
+    for sig in facts.get("signals", []):
+        parts.append(f"{sig.get('name')} ({sig.get('status')})")
+    if intent_result and intent_result.intent:
+        parts.append(f"intent:{intent_result.intent}")
+    return "; ".join(parts)[:240] or "Brief chat summary"
+
+
+def _make_user_memory_entry(intent_result, facts: Dict[str, Any]) -> str:
+    if intent_result.missing_fields:
+        return f"Asked about {intent_result.intent}; missing {intent_result.missing_fields[:1]}"
+    if intent_result.intent:
+        return f"Asked {intent_result.intent}; topics: {', '.join(intent_result.matched_keywords)}"
+    return "General question"
+
+
 @router.post("/twin/summary")
-def twin_summary(payload: SummaryRequest):
+def twin_summary(payload: SummaryRequest, authorization: str = Header(None)):
+    # optional auth; if provided, validate to tie to user identity for future history
+    if authorization:
+        decode_token_from_header(authorization, expected_type="access")
     combined = {}
     for section in (payload.labs, payload.activity, payload.sleep, payload.periods, payload.other):
         if section:

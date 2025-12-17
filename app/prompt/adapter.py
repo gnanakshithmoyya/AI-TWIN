@@ -51,10 +51,19 @@ def _intent_template(intent: Intent) -> str:
     return "Give a concise, friendly explanation based only on the facts."
 
 
-def build_prompt(question: str, facts: Dict[str, Any], intent_result: IntentResult, retrieved_docs: List[str]) -> Tuple[str, str]:
+def build_prompt(
+    question: str,
+    facts: Dict[str, Any],
+    intent_result: IntentResult,
+    retrieved_docs: List[str],
+    chat_summaries: List[str],
+    user_memory_snippets: List[str],
+    clarifier: str,
+) -> Tuple[str, str]:
     summary = _summary_snippets(facts)
-    clarifier = _clarifying_question(intent_result)
     refs_text = "\n\n".join(retrieved_docs) if retrieved_docs else "NO_REFERENCES_FOUND"
+    chat_summaries_text = "\n".join(chat_summaries) if chat_summaries else "None"
+    user_memory_text = "\n".join(user_memory_snippets) if user_memory_snippets else "None"
 
     system_prompt = f"""
 You are a health explanation assistant.
@@ -87,6 +96,12 @@ INTENT:
 
 FACTS (authoritative):
 {summary if summary else "No signals available."}
+
+CHAT SUMMARIES (this chat only, brief):
+{chat_summaries_text}
+
+USER MEMORY (user-scoped, brief; no raw values):
+{user_memory_text}
 
 MEDICAL REFERENCES (do not contradict FACTS):
 {refs_text}

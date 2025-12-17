@@ -3,6 +3,7 @@ import { Home, Activity, MessageCircle, FileText, TrendingUp, ChevronRight, Arro
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TwinVisual } from './TwinVisual';
+import { apiFetch } from '../../lib/api';
 
 // --- TYPES ---
 type Screen = 'home' | 'dashboard' | 'chat' | 'labs' | 'trends';
@@ -23,8 +24,6 @@ interface Metric {
   category: 'metabolic' | 'heart' | 'lifestyle' | 'nutrition';
   insight: string;
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 
 const DEFAULT_HEALTH = {
   fasting_glucose: 118,
@@ -421,9 +420,8 @@ const DashboardScreen = () => {
       setLoading(true);
       setError(null);
       try {
-        const resp = await fetch(`${API_BASE}/twin/summary`, {
+        const resp = await apiFetch(`/twin/summary`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(DEFAULT_HEALTH),
         });
         if (!resp.ok) throw new Error(`Summary failed: ${resp.status}`);
@@ -552,9 +550,8 @@ const ChatScreen = () => {
     setSending(true);
     setError(null);
     try {
-      const resp = await fetch(`${API_BASE}/twin/chat`, {
+      const resp = await apiFetch(`/twin/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: input,
           health_state: DEFAULT_HEALTH,
