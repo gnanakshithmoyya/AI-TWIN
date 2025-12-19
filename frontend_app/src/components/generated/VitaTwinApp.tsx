@@ -388,6 +388,9 @@ const HomeScreen = ({
 const DashboardScreen = () => {
   const [activeCat, setActiveCat] = useState('All');
   const [metrics, setMetrics] = useState<Metric[]>(METRICS);
+  const [chatId, setChatId] = useState<number | null>(null);
+  const [chatInitLoading, setChatInitLoading] = useState<boolean>(false);
+  const [chatInitError, setChatInitError] = useState<string | null>(null);
   const [disclaimer, setDisclaimer] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -414,6 +417,31 @@ const DashboardScreen = () => {
     if (lower.includes('vitamin') || lower.includes('bmi') || lower.includes('ferritin')) return 'nutrition';
     return 'metabolic';
   };
+
+  useEffect(() => {
+    const ensureChat = async () => {
+      setChatInitLoading(true);
+      setChatInitError(null);
+      try {
+        const resp = await apiFetch(`/chats`);
+        if (!resp.ok) throw new Error(`Chats fetch failed: ${resp.status}`);
+        const data = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setChatId(data[0].chat_id);
+        } else {
+          const created = await apiFetch(`/chats`, { method: 'POST' });
+          if (!created.ok) throw new Error(`Chat create failed: ${created.status}`);
+          const createdData = await created.json();
+          setChatId(createdData.chat_id);
+        }
+      } catch (err: any) {
+        setChatInitError(err?.message || 'Unable to initialize chat');
+      } finally {
+        setChatInitLoading(false);
+      }
+    };
+    ensureChat();
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -540,6 +568,10 @@ const ChatScreen = () => {
   const endRef = useRef<HTMLDivElement>(null);
   const handleSend = async () => {
     if (!input.trim()) return;
+    if (!chatId) {
+      setError("Chat is not initialized yet. Please wait a moment.");
+      return;
+    }
     const userMsg = {
       id: Date.now(),
       sender: 'user',
@@ -550,7 +582,7 @@ const ChatScreen = () => {
     setSending(true);
     setError(null);
     try {
-      const resp = await apiFetch(`/twin/chat`, {
+      const resp = await apiFetch(`/chats/${chatId}/messages`, {
         method: 'POST',
         body: JSON.stringify({
           question: input,

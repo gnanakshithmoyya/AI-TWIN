@@ -66,12 +66,36 @@ def post_message(chat_id: int, payload: ChatRequest, authorization: str = Header
     chat = repo.get_chat(db, chat_id, user_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
+    # Determine required consents
+    from app.consent.repo import get_consent_map
+    from app.consent.utils import scopes_for_health_state
+    required_scopes = set()
+    required_scopes.update(scopes_for_health_state(payload.health_state))
+    required_scopes.add("chat_history")
+    required_scopes.add("memory_personalization")
+    consent_map = get_consent_map(db, user_id)
+    missing = [s for s in required_scopes if not consent_map.get(s, False)]
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "consent_required",
+                "required_scopes": missing,
+                "message": "Please grant consent to continue."
+            }
+        )
     # re-use chat_with_twin; it requires chat_id in payload? we will pass via wrapper
     # add chat_id to request context by attaching to payload health_state? we pass separately through dependency
     # store user message
-    repo.add_message(db, chat, user_id, role="user", content=payload.question)
-    reply = process_chat(user_id=user_id, payload=payload, chat_context={"chat": chat, "db": db, "user_id": user_id})
-    repo.add_message(db, chat, user_id, role="twin", content=reply["reply"])
+    if consent_map.get("chat_history"):
+        repo.add_message(db, chat, user_id, role="user", content=payload.question)
+    reply = process_chat(
+        user_id=user_id,
+        payload=payload,
+        chat_context={"chat": chat, "db": db, "user_id": user_id, "consent_map": consent_map},
+    )
+    if consent_map.get("chat_history"):
+        repo.add_message(db, chat, user_id, role="twin", content=reply["reply"])
     # auto title if missing
     if not chat.title:
         chat.title = payload.question[:50]

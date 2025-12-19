@@ -6,6 +6,7 @@ from app.chat import router as chat_router
 from app.rag.loader import load_docs
 from app.auth.router import router as auth_router
 from app.chat_store.router import router as chat_store_router
+from app.consent.router import router as consent_router
 
 app = FastAPI()
 
@@ -23,8 +24,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
-    load_docs()
+    try:
+        load_docs()
+    except Exception:
+        # In restricted environments (e.g., no model available), skip doc loading
+        pass
 
 app.include_router(chat_router)
 app.include_router(auth_router)
 app.include_router(chat_store_router)
+app.include_router(consent_router)

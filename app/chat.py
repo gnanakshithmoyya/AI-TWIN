@@ -63,9 +63,36 @@ def process_chat(user_id: int, payload: ChatRequest, chat_context: Dict[str, Any
     # DB session for chat storage if passed via chat_context
     db = None
     chat = None
+    consent_map = None
     if chat_context:
         db = chat_context.get("db")
         chat = chat_context.get("chat")
+        consent_map = chat_context.get("consent_map")
+
+    # Consent gating: default deny
+    if db:
+        from app.consent.repo import get_consent_map
+        from app.consent.utils import scopes_for_health_state
+        if consent_map is None:
+            consent_map = get_consent_map(db, user_id)
+        required_scopes = set()
+        required_scopes.update(scopes_for_health_state(payload.health_state))
+        if chat:
+            required_scopes.add("chat_history")
+            required_scopes.add("memory_personalization")
+        missing = [s for s in required_scopes if not consent_map.get(s, False)]
+        if missing:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "consent_required",
+                    "required_scopes": missing,
+                    "message": "Please grant consent to continue.",
+                },
+            )
+
+    chat_history_ok = bool(consent_map.get("chat_history")) if consent_map else False
+    memory_ok = bool(consent_map.get("memory_personalization")) if consent_map else False
     # 1) Deterministic facts are the source of truth
     facts = evaluate_health(payload.health_state)
 
@@ -117,8 +144,10 @@ def process_chat(user_id: int, payload: ChatRequest, chat_context: Dict[str, Any
     chat_summaries = []
     user_memory_snippets = []
     if db and chat:
-        chat_summaries = repo.retrieve_chat_summaries(db, chat.id, limit=2)
-        user_memory_snippets = repo.retrieve_user_memory(db, user_id, limit=3, keywords=intent_result.matched_keywords)
+        if chat_history_ok:
+            chat_summaries = repo.retrieve_chat_summaries(db, chat.id, limit=2)
+        if memory_ok:
+            user_memory_snippets = repo.retrieve_user_memory(db, user_id, limit=3, keywords=intent_result.matched_keywords)
 
     clarifier = _clarifying_question(intent_result)
 
@@ -171,13 +200,15 @@ def process_chat(user_id: int, payload: ChatRequest, chat_context: Dict[str, Any
     # 9) Persist chat message + summary + memory (without raw values)
     if db and chat:
         try:
-            repo.upsert_chat_summary(db, chat, summary_text=_make_safe_chat_summary(facts, intent_result))
-            repo.add_user_memory(
-                db,
-                user_id=user_id,
-                kind="missing_field_pattern" if intent_result.missing_fields else "topic_pattern",
-                content=_make_user_memory_entry(intent_result, facts),
-            )
+            if chat_history_ok:
+                repo.upsert_chat_summary(db, chat, summary_text=_make_safe_chat_summary(facts, intent_result))
+            if memory_ok:
+                repo.add_user_memory(
+                    db,
+                    user_id=user_id,
+                    kind="missing_field_pattern" if intent_result.missing_fields else "topic_pattern",
+                    content=_make_user_memory_entry(intent_result, facts),
+                )
         except Exception:
             # persistence errors shouldn't break chat
             pass
@@ -188,9 +219,15 @@ def process_chat(user_id: int, payload: ChatRequest, chat_context: Dict[str, Any
 @router.post("/twin/chat")
 async def chat_with_twin(request: Request, user_id: int = Depends(require_auth), chat_context: Dict[str, Any] = None):
     # Auth checked before body parsing; now parse body
+    db = SessionLocal()
     body = await request.json()
-    payload = ChatRequest.model_validate(body)
-    return process_chat(user_id, payload, chat_context)
+    try:
+        payload = ChatRequest.model_validate(body)
+        ctx = chat_context or {}
+        ctx["db"] = ctx.get("db") or db
+        return process_chat(user_id, payload, ctx)
+    finally:
+        db.close()
 
 
 def _make_safe_chat_summary(facts: Dict[str, Any], intent_result):
