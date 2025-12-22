@@ -1,12 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Home, Activity, MessageCircle, FileText, TrendingUp, ChevronRight, ArrowUpRight, ArrowDownRight, Minus, Upload, X, Check, Search, Calendar, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TwinVisual } from './TwinVisual';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, ConsentRequiredError } from '../../lib/api';
+import { WearablesPanel } from '../wearables/WearablesPanel';
+import { ConsentModal } from '../ConsentModal';
 
 // --- TYPES ---
-type Screen = 'home' | 'dashboard' | 'chat' | 'labs' | 'trends';
+type Screen = 'home' | 'dashboard' | 'chat' | 'labs' | 'trends' | 'wearables';
 type Status = 'normal' | 'elevated' | 'high' | 'low';
 type Trend = 'up' | 'down' | 'stable';
 interface Metric {
@@ -385,12 +387,9 @@ const HomeScreen = ({
       </div>
     </div>;
 };
-const DashboardScreen = () => {
+const DashboardScreen = ({ onConsentRequired }: { onConsentRequired: (scopes?: string[], retry?: () => void) => void; }) => {
   const [activeCat, setActiveCat] = useState('All');
   const [metrics, setMetrics] = useState<Metric[]>(METRICS);
-  const [chatId, setChatId] = useState<number | null>(null);
-  const [chatInitLoading, setChatInitLoading] = useState<boolean>(false);
-  const [chatInitError, setChatInitError] = useState<string | null>(null);
   const [disclaimer, setDisclaimer] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -417,31 +416,6 @@ const DashboardScreen = () => {
     if (lower.includes('vitamin') || lower.includes('bmi') || lower.includes('ferritin')) return 'nutrition';
     return 'metabolic';
   };
-
-  useEffect(() => {
-    const ensureChat = async () => {
-      setChatInitLoading(true);
-      setChatInitError(null);
-      try {
-        const resp = await apiFetch(`/chats`);
-        if (!resp.ok) throw new Error(`Chats fetch failed: ${resp.status}`);
-        const data = await resp.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setChatId(data[0].chat_id);
-        } else {
-          const created = await apiFetch(`/chats`, { method: 'POST' });
-          if (!created.ok) throw new Error(`Chat create failed: ${created.status}`);
-          const createdData = await created.json();
-          setChatId(createdData.chat_id);
-        }
-      } catch (err: any) {
-        setChatInitError(err?.message || 'Unable to initialize chat');
-      } finally {
-        setChatInitLoading(false);
-      }
-    };
-    ensureChat();
-  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -476,7 +450,12 @@ const DashboardScreen = () => {
           setMetrics(mapped);
         }
       } catch (err: any) {
-        setError(err.message || 'Unable to load data');
+        if (err instanceof ConsentRequiredError) {
+          onConsentRequired(err.requiredScopes, () => load());
+          setError('Consent is required to view your summary.');
+        } else {
+          setError(err.message || 'Unable to load data');
+        }
       } finally {
         setLoading(false);
       }
@@ -556,7 +535,7 @@ const DashboardScreen = () => {
       </div>
     </motion.div>;
 };
-const ChatScreen = () => {
+const ChatScreen = ({ onConsentRequired }: { onConsentRequired: (scopes?: string[], retry?: () => void) => void; }) => {
   const [messages, setMessages] = useState([{
     id: 1,
     sender: 'twin',
@@ -565,27 +544,32 @@ const ChatScreen = () => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chatId, setChatId] = useState<number | null>(null);
+  const [chatInitError, setChatInitError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const sendMessage = async (question: string, skipUserAppend = false) => {
+    const text = question.trim();
+    if (!text) return;
     if (!chatId) {
       setError("Chat is not initialized yet. Please wait a moment.");
       return;
     }
-    const userMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: input
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!skipUserAppend) {
+      const userMsg = {
+        id: Date.now(),
+        sender: 'user',
+        text
+      };
+      setMessages(prev => [...prev, userMsg]);
+      setInput('');
+    }
     setSending(true);
     setError(null);
     try {
       const resp = await apiFetch(`/chats/${chatId}/messages`, {
         method: 'POST',
         body: JSON.stringify({
-          question: input,
+          question: text,
           health_state: DEFAULT_HEALTH,
         }),
       });
@@ -598,16 +582,52 @@ const ChatScreen = () => {
         text: reply
       }]);
     } catch (err: any) {
-      setError(err.message || 'Unable to reach twin right now.');
-      setMessages(prev => [...prev, {
-        id: Date.now() + 2,
-        sender: 'twin',
-        text: "I'm having trouble connecting right now. Please try again shortly."
-      }]);
+      if (err instanceof ConsentRequiredError) {
+        onConsentRequired(err.requiredScopes, () => sendMessage(text, true));
+        setError("We need your permission to continue.");
+      } else {
+        setError(err.message || 'Unable to reach twin right now.');
+        setMessages(prev => [...prev, {
+          id: Date.now() + 2,
+          sender: 'twin',
+          text: "I'm having trouble connecting right now. Please try again shortly."
+        }]);
+      }
     } finally {
       setSending(false);
     }
   };
+  const handleSend = async () => {
+    await sendMessage(input);
+  };
+
+  useEffect(() => {
+    const ensureChat = async () => {
+      setChatInitError(null);
+      try {
+        const resp = await apiFetch(`/chats`);
+        if (!resp.ok) throw new Error(`Chats fetch failed: ${resp.status}`);
+        const data = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setChatId(data[0].chat_id);
+        } else {
+          const created = await apiFetch(`/chats`, { method: 'POST' });
+          if (!created.ok) throw new Error(`Chat create failed: ${created.status}`);
+          const createdData = await created.json();
+          setChatId(createdData.chat_id);
+        }
+      } catch (err: any) {
+        if (err instanceof ConsentRequiredError) {
+          onConsentRequired(err.requiredScopes, () => ensureChat());
+          setChatInitError("Consent is required to start chat.");
+        } else {
+          setChatInitError(err?.message || 'Unable to initialize chat');
+        }
+      }
+    };
+    ensureChat();
+  }, [onConsentRequired]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({
       behavior: 'smooth'
@@ -616,12 +636,13 @@ const ChatScreen = () => {
   return <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" className="max-w-3xl mx-auto h-full flex flex-col p-6">
       <div className="flex-none mb-4">
         <h1 className="text-2xl font-semibold text-vita-text text-center">Chat with Twin</h1>
-        <div className="flex justify-center mt-2">
-           <div className="px-3 py-1 rounded-full bg-vita-sage-light text-vita-sage text-xs font-medium">
-             Active & Listening
-           </div>
-        </div>
+      <div className="flex justify-center mt-2">
+         <div className="px-3 py-1 rounded-full bg-vita-sage-light text-vita-sage text-xs font-medium">
+           Active & Listening
+         </div>
       </div>
+      {chatInitError && <p className="text-center text-xs text-red-500 mt-2">{chatInitError}</p>}
+    </div>
       
       <div className="flex-1 overflow-y-auto space-y-8 p-4">
         {messages.map((msg, i) => <motion.div key={msg.id} initial={{
@@ -808,6 +829,10 @@ const NavBar = ({
     id: 'trends',
     icon: TrendingUp,
     label: 'Trends'
+  }, {
+    id: 'wearables',
+    icon: Activity,
+    label: 'Wearables'
   }] as const;
   return <>
       {/* Desktop Sidebar */}
@@ -859,6 +884,44 @@ const NavBar = ({
 };
 export const VitaTwinApp = () => {
   const [activeScreen, setActiveScreen] = useState<Screen>('home');
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [requiredScopes, setRequiredScopes] = useState<string[] | undefined>(undefined);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+  const openConsentModal = useCallback((scopes?: string[], retry?: () => void) => {
+    if (retry) {
+      setPendingAction(() => retry);
+    }
+    setRequiredScopes(scopes && scopes.length ? scopes : undefined);
+    setConsentOpen(true);
+  }, []);
+
+  const handleConsentGranted = () => {
+    setConsentOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    action?.();
+  };
+
+  useEffect(() => {
+    const checkConsent = async () => {
+      try {
+        const resp = await apiFetch(`/consent`);
+        if (resp.ok) {
+          const data = await resp.json();
+          const values = Object.values(data || {});
+          if (values.length && values.every((v: any) => !v)) {
+            openConsentModal(Object.keys(data));
+          }
+        }
+      } catch (err: any) {
+        if (err instanceof ConsentRequiredError) {
+          openConsentModal(err.requiredScopes);
+        }
+      }
+    };
+    checkConsent();
+  }, [openConsentModal]);
   return <div className="flex h-screen w-full bg-vita-bg font-sans text-vita-text overflow-hidden selection:bg-vita-sage/20 selection:text-vita-text">
       <NavBar active={activeScreen} onChange={setActiveScreen} />
 
@@ -878,13 +941,24 @@ export const VitaTwinApp = () => {
           <AnimatePresence mode="wait">
             <motion.div key={activeScreen} className="h-full">
               {activeScreen === 'home' && <HomeScreen onNavigate={setActiveScreen} />}
-              {activeScreen === 'dashboard' && <DashboardScreen />}
-              {activeScreen === 'chat' && <ChatScreen />}
+              {activeScreen === 'dashboard' && <DashboardScreen onConsentRequired={openConsentModal} />}
+              {activeScreen === 'chat' && <ChatScreen onConsentRequired={openConsentModal} />}
               {activeScreen === 'labs' && <LabsScreen />}
               {activeScreen === 'trends' && <TrendsScreen />}
+              {activeScreen === 'wearables' && <WearablesPanel onConsentRequired={openConsentModal} />}
             </motion.div>
           </AnimatePresence>
         </div>
       </main>
+
+      <ConsentModal
+        open={consentOpen}
+        requiredScopes={requiredScopes}
+        onClose={() => {
+          setPendingAction(null);
+          setConsentOpen(false);
+        }}
+        onGranted={handleConsentGranted}
+      />
     </div>;
 };

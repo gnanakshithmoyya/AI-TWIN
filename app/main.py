@@ -7,6 +7,7 @@ from app.rag.loader import load_docs
 from app.auth.router import router as auth_router
 from app.chat_store.router import router as chat_store_router
 from app.consent.router import router as consent_router
+from app.wearables.router import router as wearables_router
 
 app = FastAPI()
 
@@ -34,3 +35,4 @@ app.include_router(chat_router)
 app.include_router(auth_router)
 app.include_router(chat_store_router)
 app.include_router(consent_router)
+app.include_router(wearables_router)
